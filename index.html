@@ -37,6 +37,9 @@ header{display:flex;gap:12px;align-items:center;padding:14px 20px;border-bottom:
 
 main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;padding:20px;max-width:1500px;margin:0 auto}
 @media (max-width:980px){main{grid-template-columns:1fr;padding:12px}}
+body.nopanel main{grid-template-columns:1fr;max-width:1100px}
+body.nopanel aside{display:none}
+.tabs .hide{flex:0 0 auto;padding:14px 16px;font-size:18px}
 
 .stage{min-width:0}
 .video{position:relative;aspect-ratio:16/9;background:#000;border-radius:14px;overflow:hidden}
@@ -125,6 +128,7 @@ aside{background:var(--surface);border-radius:14px;display:flex;flex-direction:c
     <div class="subline" id="subline"><div class="empty">Subtitr shu yerda chiqadi. Bilmagan so'zingiz ustiga bosing — o'zbekcha tarjimasi ko'rinadi.</div></div>
 
     <div class="controls">
+      <button class="btn small" id="panelBtn" title="Yon panelni ochish / yopish">☰ Panel</button>
       <button class="btn small primary" id="playBtn" title="Pauza / Davom (Space)">⏯ Pauza</button>
       <button class="btn small" id="prevCue" title="Oldingi gap (←)">⟨ Oldingi</button>
       <button class="btn small" id="repeatCue" title="Gapni qaytarish (R)">↻ Qaytarish</button>
@@ -133,6 +137,7 @@ aside{background:var(--surface);border-radius:14px;display:flex;flex-direction:c
       <button class="btn small" id="offMinus" title="Subtitrni oldinga surish">−0.5s</button>
       <span class="offset" id="offsetLbl">±0.0s</span>
       <button class="btn small" id="offPlus" title="Subtitrni orqaga surish">+0.5s</button>
+      <label class="toggle"><input type="checkbox" id="fullSent" checked> Butun gap</label>
       <label class="toggle"><input type="checkbox" id="autoPause" checked> So'z bosilganda pauza</label>
     </div>
   </section>
@@ -141,6 +146,7 @@ aside{background:var(--surface);border-radius:14px;display:flex;flex-direction:c
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected="true" data-tab="subs">Subtitr</button>
       <button role="tab" aria-selected="false" data-tab="vocab">Lug'atim <span id="vcount"></span></button>
+      <button class="hide" id="panelClose" title="Panelni yopish" aria-label="Panelni yopish">✕</button>
     </div>
 
     <div class="panel" id="panel-subs">
@@ -181,7 +187,7 @@ aside{background:var(--surface);border-radius:14px;display:flex;flex-direction:c
 /* ---------- Holat ---------- */
 const $ = id => document.getElementById(id);
 let player = null, ytReady = false, pendingId = null;
-let cues = [], curIdx = -1, offset = 0, currentVideo = "";
+let rawCues = [], cues = [], curIdx = -1, offset = 0, currentVideo = "";
 const store = {
   get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
   set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
@@ -293,6 +299,24 @@ function parseTranscript(raw){
   res.forEach((c, i) => c.end = res[i + 1] ? res[i + 1].start : c.start + 5);
   return res;
 }
+// Bo'lak-bo'lak subtitrlarni butun gaplarga birlashtirish
+function buildCues(){
+  if (!$("fullSent").checked) return rawCues.map(c => ({...c}));
+  const ends = /[.?!…]["'”’)\]]*$/;
+  const hasPunct = rawCues.filter(c => /[.?!]/.test(c.text)).length > rawCues.length * 0.15;
+  const out = []; let cur = null;
+  for (const c of rawCues){
+    if (cur){
+      const gap = c.start - cur.end, words = cur.text.split(" ").length;
+      const tooLong = hasPunct ? (words > 40 || c.end - cur.start > 20) : (words > 18 || c.end - cur.start > 9);
+      if (ends.test(cur.text) || gap > 1.5 || tooLong || /^[-–—♪\[]/.test(c.text)){ out.push(cur); cur = null; }
+    }
+    if (!cur) cur = { start: c.start, end: c.end, text: c.text };
+    else { cur.text += " " + c.text; cur.end = Math.max(cur.end, c.end); }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
 function setSubs(raw){
   if (/youtu\.?be/.test(raw) && !raw.includes("-->")){
     const id = parseYouTubeId(raw); if (id){ $("urlInput").value = raw.trim(); loadVideo(id); }
@@ -301,7 +325,7 @@ function setSubs(raw){
   }
   const parsed = parseSubs(raw);
   if (!parsed.length) return toast("Subtitr topilmadi. Fayl .srt yoki .vtt formatida ekanini tekshiring.");
-  cues = parsed; curIdx = -1;
+  rawCues = parsed; cues = buildCues(); curIdx = -1;
   $("loader").hidden = true; $("howto").hidden = true;
   renderCueList();
   toast(cues.length + " ta gap yuklandi");
@@ -356,7 +380,10 @@ setInterval(() => {
   document.querySelectorAll(".cue.now").forEach(n => n.classList.remove("now"));
   if (idx >= 0){
     const row = document.querySelector(`.cue[data-i="${idx}"]`);
-    if (row){ row.classList.add("now"); if (!$("panel-subs").hidden) row.scrollIntoView({block:"center", behavior:"smooth"}); }
+    if (row){ row.classList.add("now"); if (!$("panel-subs").hidden) {
+      const pan = $("panel-subs"), pr = pan.getBoundingClientRect(), rr = row.getBoundingClientRect();
+      pan.scrollTo({ top: pan.scrollTop + (rr.top - pr.top) - pan.clientHeight/2 + rr.height/2, behavior: "smooth" });
+    } }
   }
 }, 120);
 
@@ -374,6 +401,7 @@ function togglePlay(){
 $("playBtn").onclick = togglePlay;
 document.querySelectorAll(".controls button").forEach(b => b.addEventListener("mouseup", () => b.blur()));
 setInterval(() => { if (player && player.getPlayerState) $("playBtn").textContent = player.getPlayerState() === 1 ? "⏸ Pauza" : "▶ Davom"; }, 300);
+$("fullSent").onchange = () => { if (!rawCues.length) return; cues = buildCues(); curIdx = -2; renderCueList(); };
 $("prevCue").onclick = () => jump(-1);
 $("nextCue").onclick = () => jump(1);
 $("repeatCue").onclick = () => jump(0);
@@ -391,8 +419,8 @@ document.addEventListener("keydown", e => {
 });
 
 /* ---------- Tablar ---------- */
-document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x === b));
+document.querySelectorAll(".tabs button[data-tab]").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button[data-tab]").forEach(x => x.setAttribute("aria-selected", x === b));
   $("panel-subs").hidden = b.dataset.tab !== "subs";
   $("panel-vocab").hidden = b.dataset.tab !== "vocab";
 });
@@ -511,6 +539,14 @@ $("exportBtn").onclick = () => {
 let tt;
 function toast(msg){ const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 2600); }
 
+function setPanel(open){
+  document.body.classList.toggle("nopanel", !open);
+  $("panelBtn").textContent = open ? "☰ Panelni yopish" : "☰ Panelni ochish";
+  store.set("tilmoch.panel", open);
+}
+$("panelBtn").onclick = () => setPanel(document.body.classList.contains("nopanel"));
+$("panelClose").onclick = () => setPanel(false);
+setPanel(store.get("tilmoch.panel", true));
 renderVocab();
 </script>
 </body>
