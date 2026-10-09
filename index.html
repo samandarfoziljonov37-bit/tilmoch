@@ -18,6 +18,22 @@
 *,*::before,*::after{box-sizing:inherit}
 [hidden]{display:none!important}
 .video .placeholder{pointer-events:none}
+.ov{position:absolute;left:0;right:0;bottom:58px;display:flex;justify-content:center;padding:0 5%;pointer-events:none;z-index:3}
+.ovsub{max-width:100%;text-align:center;font-weight:600;font-size:clamp(16px,2.4vw,28px);line-height:1.4;color:#fff;
+  background:rgba(0,0,0,.72);padding:6px 14px;border-radius:8px;pointer-events:auto;text-shadow:0 1px 2px #000}
+.ovsub:empty{display:none}
+.ovsub .w:hover,.ovsub .w.active{background:var(--marker);color:#1E1626;text-shadow:none}
+body.ovoff .ov{display:none}
+body:not(.ovoff) #subline{display:none}
+.clicklayer{position:absolute;inset:0;z-index:2;display:none;cursor:pointer}
+.fsbar{position:absolute;top:14px;right:14px;z-index:4;display:none;gap:8px;transition:opacity .25s}
+.fsbar .btn{background:rgba(30,22,38,.85)}
+.video:fullscreen{border-radius:0;aspect-ratio:auto;width:100vw;height:100vh}
+.video:fullscreen .clicklayer,.video:fullscreen .fsbar{display:flex}
+.video:fullscreen .ov{bottom:7vh}
+.video:fullscreen .ovsub{font-size:clamp(22px,3.2vw,46px)}
+.video.idle .fsbar{opacity:0}
+.video.idle:fullscreen{cursor:none}
 html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.5}
 button,input{font:inherit;color:inherit}
@@ -122,6 +138,15 @@ aside{background:var(--surface);border-radius:14px;display:flex;flex-direction:c
   <section class="stage">
     <div class="video">
       <div id="player"></div>
+      <div class="clicklayer" id="clicklayer" title="Pauza / Davom"></div>
+      <div class="ov"><div class="ovsub" id="ovsub"></div></div>
+      <div class="fsbar">
+        <button class="btn small" data-fs="prev" title="Oldingi gap">⟨</button>
+        <button class="btn small" data-fs="play" title="Pauza / Davom">⏯</button>
+        <button class="btn small" data-fs="repeat" title="Qaytarish">↻</button>
+        <button class="btn small" data-fs="next" title="Keyingi gap">⟩</button>
+        <button class="btn small" data-fs="exit" title="Chiqish (Esc)">✕ Chiqish</button>
+      </div>
       <div class="placeholder" id="placeholder">Yuqoriga YouTube video havolasini qo'ying,<br>o'ngdagi panelga esa subtitr faylini (.srt yoki .vtt) yuklang.</div>
     </div>
 
@@ -137,7 +162,9 @@ aside{background:var(--surface);border-radius:14px;display:flex;flex-direction:c
       <button class="btn small" id="offMinus" title="Subtitrni oldinga surish">−0.5s</button>
       <span class="offset" id="offsetLbl">±0.0s</span>
       <button class="btn small" id="offPlus" title="Subtitrni orqaga surish">+0.5s</button>
+      <button class="btn small" id="fsBtn" title="To'liq ekran (F)">⛶ To'liq ekran</button>
       <label class="toggle"><input type="checkbox" id="fullSent" checked> Butun gap</label>
+      <label class="toggle"><input type="checkbox" id="ovToggle" checked> Subtitr video ustida</label>
       <label class="toggle"><input type="checkbox" id="autoPause" checked> So'z bosilganda pauza</label>
     </div>
   </section>
@@ -233,7 +260,7 @@ function loadVideo(id){
     return;
   }
   if (player){ player.loadVideoById(id); return; }
-  const vars = { rel:0, playsinline:1, cc_load_policy:0 };
+  const vars = { rel:0, playsinline:1, cc_load_policy:0, fs:0 };
   if (isHosted) vars.origin = location.origin;
   player = new YT.Player("player", {
     videoId: id,
@@ -356,6 +383,7 @@ function esc(s){ return s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"
 
 function renderLine(){
   const c = cues[curIdx];
+  $("ovsub").innerHTML = c ? wordsHTML(c.text, curIdx) : "";
   $("subline").innerHTML = c ? `<div>${wordsHTML(c.text, curIdx)}</div>` : (cues.length ? "<div>&nbsp;</div>" : $("subline").innerHTML);
 }
 function renderCueList(){
@@ -412,6 +440,7 @@ $("offPlus").onclick = () => setOffset(offset + 0.5);
 document.addEventListener("keydown", e => {
   if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
   if (e.key === "Escape") return closePop();
+  if (e.key.toLowerCase() === "f"){ e.preventDefault(); return toggleFS(); }
   if (e.key === "ArrowLeft"){ e.preventDefault(); jump(-1); }
   else if (e.key === "ArrowRight"){ e.preventDefault(); jump(1); }
   else if (e.key.toLowerCase() === "r") jump(0);
@@ -547,6 +576,40 @@ function setPanel(open){
 $("panelBtn").onclick = () => setPanel(document.body.classList.contains("nopanel"));
 $("panelClose").onclick = () => setPanel(false);
 setPanel(store.get("tilmoch.panel", true));
+/* ---------- To'liq ekran ---------- */
+const vbox = document.querySelector(".video");
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+function toggleFS(){
+  if (fsEl()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  else {
+    if (!player) return toast("Avval videoni oching.");
+    (vbox.requestFullscreen || vbox.webkitRequestFullscreen).call(vbox);
+  }
+}
+$("fsBtn").onclick = toggleFS;
+function onFS(){
+  const on = !!fsEl();
+  // tarjima oynasi va xabarlar to'liq ekranda ham ko'rinishi uchun video ichiga ko'chiriladi
+  (on ? vbox : document.body).append($("pop"), $("toast"));
+  closePop();
+  $("fsBtn").textContent = on ? "⛶ Chiqish" : "⛶ To'liq ekran";
+  wake();
+}
+document.addEventListener("fullscreenchange", onFS);
+document.addEventListener("webkitfullscreenchange", onFS);
+$("clicklayer").onclick = () => { if (!$("pop").hidden) return closePop(); togglePlay(); };
+$("clicklayer").ondblclick = toggleFS;
+document.querySelectorAll("[data-fs]").forEach(b => b.onclick = e => {
+  e.stopPropagation();
+  ({ prev: () => jump(-1), next: () => jump(1), repeat: () => jump(0), play: togglePlay, exit: toggleFS })[b.dataset.fs]();
+});
+let idleT;
+function wake(){ vbox.classList.remove("idle"); clearTimeout(idleT); idleT = setTimeout(() => vbox.classList.add("idle"), 2500); }
+vbox.addEventListener("mousemove", wake);
+
+function setOv(on){ document.body.classList.toggle("ovoff", !on); $("ovToggle").checked = on; store.set("tilmoch.ov", on); }
+$("ovToggle").onchange = e => setOv(e.target.checked);
+setOv(store.get("tilmoch.ov", true));
 renderVocab();
 </script>
 </body>
