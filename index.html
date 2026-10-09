@@ -149,10 +149,10 @@ aside{background:var(--surface);border-radius:14px;display:flex;flex-direction:c
         <div class="row">
           <label class="btn small">Fayl tanlash<input type="file" id="fileInput" accept=".srt,.vtt,.txt" hidden></label>
         </div>
-        <textarea id="pasteArea" placeholder="…yoki subtitr matnini shu yerga joylashtiring"></textarea>
+        <textarea id="pasteArea" placeholder="…yoki YouTube transkriptini / subtitr matnini shu yerga joylashtiring"></textarea>
         <div class="row"><button class="btn small" id="pasteBtn">Matnni yuklash</button></div>
       </div>
-      <p class="hint" id="howto">Subtitr qayerdan olinadi? Video havolasini <b>downsub.com</b> yoki <b>savesubs.com</b> saytiga qo'yib, inglizcha .srt faylni yuklab oling. Yoki terminalda:<br><code>yt-dlp --write-auto-subs --sub-lang en --skip-download --convert-subs srt HAVOLA</code></p>
+      <p class="hint" id="howto"><b>Subtitr qayerdan olinadi?</b><br>1) YouTube'da video ostidagi tavsifni oching → <b>"Show transcript"</b> (Транскрипт) tugmasini bosing → chiqqan matnni sichqoncha bilan to'liq belgilab nusxalang (Ctrl+C) → yuqoridagi maydonga qo'yib, "Matnni yuklash"ni bosing.<br>2) Yoki <b>downsub.com</b> / <b>savesubs.com</b> saytidan inglizcha .srt faylni yuklab oling.</p>
       <div id="cueList"></div>
     </div>
 
@@ -251,6 +251,7 @@ function toSec(t){
   return p.length === 3 ? p[0]*3600 + p[1]*60 + p[2] : p[0]*60 + p[1];
 }
 function parseSubs(raw){
+  if (!raw.includes("-->")) return parseTranscript(raw);
   const blocks = raw.replace(/\r/g, "").split(/\n{2,}/);
   const out = [];
   for (const b of blocks){
@@ -275,6 +276,22 @@ function parseSubs(raw){
     clean.push(c);
   }
   return clean;
+}
+// YouTube "Transkriptni ko'rsatish" panelidan nusxalangan matn: "0:05" + matn qatorlari
+function parseTranscript(raw){
+  const ts = /^\s*((?:\d+:)?\d{1,2}:\d{2})\s*(.*)$/;
+  const junk = /^\s*\d+\s*(seconds?|minutes?|hours?|soniya|daqiqa|sekund|минут|секунд)/i;
+  const out = []; let cur = null;
+  for (const line of raw.replace(/\r/g,"").split("\n")){
+    const t = line.trim(); if (!t) continue;
+    const m = t.match(ts);
+    if (m){ cur = { start: toSec(m[1]), text: m[2] || "" }; out.push(cur); continue; }
+    if (junk.test(t) && cur && !cur.text) continue;
+    if (cur) cur.text = (cur.text + " " + t).trim();
+  }
+  const res = out.filter(c => c.text);
+  res.forEach((c, i) => c.end = res[i + 1] ? res[i + 1].start : c.start + 5);
+  return res;
 }
 function setSubs(raw){
   if (/youtu\.?be/.test(raw) && !raw.includes("-->")){
